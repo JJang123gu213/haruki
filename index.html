@@ -489,18 +489,34 @@ async function processReceiptPhoto(input) {
       generationConfig: {maxOutputTokens: 1024}
     };
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    // gemini-2.0-flash 사용 (안정적)
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     });
 
     const data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'API 오류');
+
     let allText = '';
     (data.candidates?.[0]?.content?.parts || []).forEach(p => { if(p.text) allText += p.text; });
 
-    const jsonMatch = allText.substring(allText.indexOf('{'), allText.lastIndexOf('}') + 1);
-    const result = JSON.parse(jsonMatch);
+    if (!allText) throw new Error('AI 응답이 비어있습니다');
+
+    // JSON 블록 추출 (```json ... ``` 또는 { ... })
+    let jsonStr = '';
+    const codeBlockMatch = allText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
+    } else {
+      const fi = allText.indexOf('{');
+      const li = allText.lastIndexOf('}');
+      if (fi === -1 || li === -1) throw new Error('JSON을 찾을 수 없습니다');
+      jsonStr = allText.substring(fi, li + 1);
+    }
+
+    const result = JSON.parse(jsonStr);
 
     const now = new Date();
     const dateStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
