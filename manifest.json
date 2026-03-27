@@ -1,0 +1,11 @@
+{
+  "name": "HARUKI 재고관리",
+  "short_name": "HARUKI",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3B82F6",
+  "icons": [
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png" }
+  ]
+}
