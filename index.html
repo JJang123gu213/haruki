@@ -726,15 +726,40 @@ let recognition = null;
 let isListening = false;
 
 function speak(text) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ko-KR';
-    u.rate = 1.1;
-    u.pitch = 1.0;
-    window.speechSynthesis.speak(u);
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ko-KR';
+  u.rate = 1.1;
+  u.pitch = 1.0;
+  // iOS에서 음성 목록 로드 대기
+  const voices = window.speechSynthesis.getVoices();
+  const koVoice = voices.find(v => v.lang.startsWith('ko'));
+  if (koVoice) u.voice = koVoice;
+  window.speechSynthesis.speak(u);
+  // iOS Safari 버그: 긴 문장 중간에 멈추는 현상 방지
+  if (/iPhone|iPad/i.test(navigator.userAgent)) {
+    const resumeTimer = setInterval(() => {
+      if (!window.speechSynthesis.speaking) { clearInterval(resumeTimer); return; }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 5000);
   }
 }
+
+// iOS에서 음성 목록 미리 로드
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+// iOS에서 TTS 활성화 (첫 터치 시 빈 음성 재생으로 잠금 해제)
+document.addEventListener('touchstart', function initTTS() {
+  const u = new SpeechSynthesisUtterance('');
+  u.volume = 0;
+  window.speechSynthesis.speak(u);
+  document.removeEventListener('touchstart', initTTS);
+}, {once: true});
 
 async function correctWithGemini(raw) {
   const apiKey = getGeminiKey();
@@ -779,6 +804,9 @@ ${vendorNames}
   return raw;
 }
 
+let voiceRetryCount = 0;
+let gotResult = false;
+
 function toggleVoice() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('이 브라우저에서 음성 인식을 지원하지 않습니다');
@@ -787,14 +815,21 @@ function toggleVoice() {
 
   if (isListening) {
     recognition.stop();
+    voiceRetryCount = 0;
     return;
   }
 
+  startRecognition();
+}
+
+function startRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
   recognition.lang = 'ko-KR';
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 3;
+  gotResult = false;
 
   const btn = document.getElementById('micBtn');
   const feedback = document.getElementById('micFeedback');
@@ -803,13 +838,17 @@ function toggleVoice() {
     isListening = true;
     btn.classList.add('listening');
     feedback.style.display = 'block';
-    feedback.textContent = '듣고 있어요...';
+    feedback.textContent = voiceRetryCount > 0 ? '다시 듣고 있어요...' : '듣고 있어요...';
   };
 
   recognition.onresult = (e) => {
-    const text = Array.from(e.results).map(r => r[0].transcript).join('');
+    gotResult = true;
+    voiceRetryCount = 0;
+    const last = e.results[e.results.length - 1];
+    const text = last[0].transcript;
     feedback.textContent = text;
-    if (e.results[0].isFinal) {
+    if (last.isFinal) {
+      recognition.stop();
       correctWithGemini(text).then(corrected => handleVoiceCommand(corrected));
     }
   };
@@ -817,15 +856,36 @@ function toggleVoice() {
   recognition.onend = () => {
     isListening = false;
     btn.classList.remove('listening');
-    setTimeout(() => { feedback.style.display = 'none'; }, 2000);
+    if (!gotResult && voiceRetryCount < 2) {
+      voiceRetryCount++;
+      feedback.textContent = '다시 말해주세요...';
+      setTimeout(() => startRecognition(), 300);
+      return;
+    }
+    if (!gotResult) {
+      feedback.textContent = '인식 실패. 마이크를 다시 눌러주세요';
+      speak('인식하지 못했어요. 마이크를 다시 눌러주세요');
+      voiceRetryCount = 0;
+    }
+    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
   };
 
-  recognition.onerror = () => {
-    isListening = false;
-    btn.classList.remove('listening');
-    feedback.textContent = '잘 못 들었어요. 다시 말해주세요';
-    speak('잘 못 들었어요. 다시 말해주세요');
-    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+  recognition.onerror = (e) => {
+    if (e.error === 'no-speech') {
+      // 말을 안 한 경우 - 자동 재시도
+      if (voiceRetryCount < 2) {
+        voiceRetryCount++;
+        return; // onend에서 재시도
+      }
+    }
+    if (e.error === 'aborted' || e.error === 'not-allowed') {
+      isListening = false;
+      btn.classList.remove('listening');
+      feedback.textContent = '마이크 권한을 확인해주세요';
+      speak('마이크 권한을 확인해주세요');
+      voiceRetryCount = 0;
+      setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+    }
   };
 
   recognition.start();
