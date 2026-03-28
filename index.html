@@ -278,7 +278,16 @@ function filterProducts() {
 function showProductDetail(barcode) {
   const p = products.find(x => x.BARCODE === barcode);
   if (!p) return;
-  const stock = parseInt(p.STOCK)||0;
+  let specs = [];
+  try { specs = typeof p.SPECS === 'string' ? JSON.parse(p.SPECS) : (p.SPECS || []); } catch(e) {}
+  if (!Array.isArray(specs)) specs = [];
+  const specsHtml = specs.length > 0 ? specs.map((s,i) => `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;padding:8px;background:#f9f9f9;border-radius:8px">
+      <span style="font-size:13px;color:#888;min-width:24px">${i+1}</span>
+      <input class="input specColor" value="${s.color||''}" placeholder="색상" style="flex:2;margin:0">
+      <input class="input specSize" value="${s.size||''}" placeholder="사이즈" style="flex:1;margin:0">
+      <input class="input specQty" type="number" value="${s.qty||0}" placeholder="수량" style="flex:1;margin:0">
+    </div>`).join('') : '<div style="padding:12px;color:#999;text-align:center;font-size:13px">규격 정보 없음</div>';
   document.getElementById('detailContent').innerHTML = `
     <div class="modal-title">상품 상세</div>
     <label style="font-size:13px;color:#888">상품명</label>
@@ -291,8 +300,10 @@ function showProductDetail(barcode) {
     <input class="input" id="editProductBuy" type="text" value="${p.BUY}">
     <label style="font-size:13px;color:#888">판매가</label>
     <input class="input" id="editProductSell" type="text" value="${p.SELL}">
-    <label style="font-size:13px;color:#888">재고</label>
+    <label style="font-size:13px;color:#888">총 재고</label>
     <input class="input" id="newStockInput" type="number" value="${p.STOCK}">
+    <label style="font-size:13px;color:#888;margin-top:8px">색상/사이즈별 규격</label>
+    <div id="specsContainer">${specsHtml}</div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-blue" onclick="updateProduct('${p.BARCODE}')" style="flex:1">저장</button>
       <button class="btn btn-gray" onclick="closeModal('detailModal')" style="flex:1">닫기</button>
@@ -302,10 +313,27 @@ function showProductDetail(barcode) {
 }
 
 async function updateProduct(barcode) {
-  const newStock = parseInt(document.getElementById('newStockInput').value);
-  if (isNaN(newStock)) return;
+  const specs = [];
+  const container = document.getElementById('specsContainer');
+  const rows = container.querySelectorAll('div[style*="display:flex"]');
+  let totalQty = 0;
+  rows.forEach(row => {
+    const color = row.querySelector('.specColor')?.value || '';
+    const size = row.querySelector('.specSize')?.value || '';
+    const qty = row.querySelector('.specQty')?.value || '0';
+    specs.push({barcode:'', size, color, note:'', qty});
+    totalQty += parseInt(qty) || 0;
+  });
+  const data = {
+    NAME: document.getElementById('editProductName').value,
+    VENDOR: document.getElementById('editProductVendor').value,
+    BUY: document.getElementById('editProductBuy').value,
+    SELL: document.getElementById('editProductSell').value,
+    STOCK: specs.length > 0 ? String(totalQty) : document.getElementById('newStockInput').value,
+    SPECS: specs.length > 0 ? JSON.stringify(specs) : ''
+  };
   try {
-    await apiPost({action:'updateStock',barcode,newStock});
+    await apiPost({action:'updateProduct', barcode, data});
     alert('저장되었습니다');
     closeModal('detailModal');
     loadAll();
