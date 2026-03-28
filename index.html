@@ -721,55 +721,46 @@ async function executePrint() {
   }
 }
 
-// ===== 음성 인식 + TTS =====
-let recognition = null;
+// ===== TTS =====
 let isListening = false;
+let ttsReady = false;
 
 function speak(text) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'ko-KR';
-  u.rate = 1.1;
-  u.pitch = 1.0;
-  // iOS에서 음성 목록 로드 대기
-  const voices = window.speechSynthesis.getVoices();
-  const koVoice = voices.find(v => v.lang.startsWith('ko'));
-  if (koVoice) u.voice = koVoice;
-  window.speechSynthesis.speak(u);
-  // iOS Safari 버그: 긴 문장 중간에 멈추는 현상 방지
-  if (/iPhone|iPad/i.test(navigator.userAgent)) {
-    const resumeTimer = setInterval(() => {
-      if (!window.speechSynthesis.speaking) { clearInterval(resumeTimer); return; }
-      window.speechSynthesis.pause();
-      window.speechSynthesis.resume();
-    }, 5000);
+  if (!('speechSynthesis' in window) || !ttsReady) {
+    console.log('TTS:', text);
+    return;
   }
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    u.rate = 1.0;
+    window.speechSynthesis.speak(u);
+  } catch(e) {}
 }
 
-// iOS에서 음성 목록 미리 로드
-if ('speechSynthesis' in window) {
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-}
-
-// iOS에서 TTS 활성화 (첫 터치 시 빈 음성 재생으로 잠금 해제)
-document.addEventListener('touchstart', function initTTS() {
-  const u = new SpeechSynthesisUtterance('');
-  u.volume = 0;
-  window.speechSynthesis.speak(u);
-  document.removeEventListener('touchstart', initTTS);
+// 아무 터치 시 TTS 활성화 (iOS 필수)
+document.addEventListener('click', function unlockTTS() {
+  if ('speechSynthesis' in window) {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0.01;
+    u.onend = () => { ttsReady = true; };
+    window.speechSynthesis.speak(u);
+  }
+  document.removeEventListener('click', unlockTTS);
 }, {once: true});
 
+// ===== 음성 녹음 + Gemini 전사 =====
 let mediaRecorder = null;
 let audioChunks = [];
+let recordingStream = null;
 
 async function transcribeWithGemini(audioBlob) {
   const apiKey = getGeminiKey();
-  if (!apiKey) { speak('API 키를 설정해주세요'); return null; }
+  if (!apiKey) return null;
 
-  const reader = new FileReader();
   const base64 = await new Promise(resolve => {
+    const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result.split(',')[1]);
     reader.readAsDataURL(audioBlob);
   });
@@ -777,111 +768,140 @@ async function transcribeWithGemini(audioBlob) {
   const productNames = products.slice(0, 100).map(p => p.NAME).join(', ');
   const vendorNames = vendors.slice(0, 30).map(v => v.NAME).join(', ');
 
-  const prompt = `이 음성을 텍스트로 변환하고 교정해줘. 의류 매장 재고관리 앱의 음성 명령이야.
+  const prompt = `이 음성을 텍스트로 변환해줘. 의류 매장 재고관리 앱의 음성 명령이야.
 
-## 등록된 상품명
-${productNames}
+등록된 상품명: ${productNames}
+등록된 거래처: ${vendorNames}
 
-## 등록된 거래처
-${vendorNames}
+가능한 명령: [상품명] [숫자]개 입고/출고, 상품, 거래처, 고객, 사입, 새로고침, 출력
 
-## 가능한 명령 패턴
-- "[상품명] [숫자]개 입고/출고" (예: "스카시 단가라후드 검정 3개 입고")
-- "상품", "거래처", "고객", "사입", "새로고침", "출력"
+발음이 비슷하면 등록된 상품명으로 교정하고, 단어 순서가 달라도 맞춰줘.
+교정된 문장만 출력. 설명 없이.`;
 
-## 교정 규칙
-1. 발음이 비슷한 단어를 등록된 상품명으로 교정
-2. 단어 순서가 바뀌어도 가장 일치하는 상품명으로 재배열
-3. 상품명에 포함된 단어들이 분리되어 인식됐으면 합쳐줘
-4. 숫자와 입고/출고 키워드는 그대로 유지
-5. 교정된 문장만 출력. 설명 없이.`;
+  const mimeType = audioBlob.type || 'audio/mp4';
 
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            {text: prompt},
-            {inline_data: {mime_type: audioBlob.type || 'audio/webm', data: base64}}
-          ]
-        }]
-      })
-    });
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-  } catch(e) { return null; }
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          {text: prompt},
+          {inline_data: {mime_type: mimeType, data: base64}}
+        ]
+      }]
+    })
+  });
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
 }
 
 function toggleVoice() {
   const btn = document.getElementById('micBtn');
   const feedback = document.getElementById('micFeedback');
 
-  // 녹음 중이면 중지
-  if (isListening && mediaRecorder) {
-    mediaRecorder.stop();
+  // 녹음 중이면 중지 → 분석
+  if (isListening) {
+    stopRecording();
     return;
   }
 
-  // 녹음 시작
-  navigator.mediaDevices.getUserMedia({audio: true}).then(stream => {
-    // iOS Safari 호환 포맷
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
-    mediaRecorder = new MediaRecorder(stream, {mimeType});
+  // API 키 확인
+  const apiKey = getGeminiKey();
+  if (!apiKey) {
+    alert('설정에서 Gemini API 키를 먼저 입력해주세요.');
+    return;
+  }
+
+  // 마이크 권한 요청 + 녹음 시작
+  feedback.style.display = 'block';
+  feedback.textContent = '마이크 준비 중...';
+
+  navigator.mediaDevices.getUserMedia({
+    audio: {echoCancellation: true, noiseSuppression: true}
+  }).then(stream => {
+    recordingStream = stream;
     audioChunks = [];
 
+    // 포맷 선택 (iOS: mp4, 나머지: webm)
+    let options = {};
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+      options.mimeType = 'audio/webm;codecs=opus';
+    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+      options.mimeType = 'audio/mp4';
+    }
+    mediaRecorder = new MediaRecorder(stream, options);
+
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
+      if (e.data && e.data.size > 0) audioChunks.push(e.data);
     };
 
     mediaRecorder.onstart = () => {
       isListening = true;
       btn.classList.add('listening');
-      feedback.style.display = 'block';
-      feedback.textContent = '말해주세요... (다시 누르면 완료)';
+      btn.textContent = '⏹';
+      feedback.textContent = '🔴 듣고 있어요... 다시 누르면 완료';
+      speak('말씀하세요');
     };
 
     mediaRecorder.onstop = async () => {
       isListening = false;
       btn.classList.remove('listening');
-      stream.getTracks().forEach(t => t.stop());
+      btn.textContent = '🎤';
+
+      // 마이크 스트림 해제
+      if (recordingStream) {
+        recordingStream.getTracks().forEach(t => t.stop());
+        recordingStream = null;
+      }
+      mediaRecorder = null;
 
       if (audioChunks.length === 0) {
-        feedback.textContent = '녹음 실패';
-        setTimeout(() => { feedback.style.display = 'none'; }, 2000);
+        feedback.textContent = '❌ 녹음된 소리가 없어요';
+        speak('녹음된 소리가 없어요');
+        setTimeout(() => { feedback.style.display = 'none'; }, 3000);
         return;
       }
 
-      feedback.textContent = 'AI가 분석 중...';
-      const blob = new Blob(audioChunks, {type: mediaRecorder.mimeType});
-      const result = await transcribeWithGemini(blob);
+      feedback.textContent = '🤖 AI가 분석 중...';
+      try {
+        const blob = new Blob(audioChunks, {type: options.mimeType || 'audio/mp4'});
+        const result = await transcribeWithGemini(blob);
 
-      if (result) {
-        feedback.textContent = result;
-        handleVoiceCommand(result);
-        setTimeout(() => { feedback.style.display = 'none'; }, 3000);
-      } else {
-        feedback.textContent = '인식 실패. 다시 시도해주세요';
-        speak('인식하지 못했어요. 다시 시도해주세요');
-        setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+        if (result) {
+          feedback.textContent = '✅ ' + result;
+          speak(result);
+          handleVoiceCommand(result);
+        } else {
+          feedback.textContent = '❌ 인식 실패. 다시 시도해주세요';
+          speak('인식하지 못했어요');
+        }
+      } catch(e) {
+        feedback.textContent = '❌ 오류: ' + e.message;
+        speak('오류가 발생했어요');
       }
+      setTimeout(() => { feedback.style.display = 'none'; }, 4000);
     };
 
-    mediaRecorder.start();
+    // 500ms마다 데이터 수집 (iOS 호환)
+    mediaRecorder.start(500);
 
-    // 10초 후 자동 종료
-    setTimeout(() => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      }
-    }, 10000);
+    // 15초 후 자동 종료
+    setTimeout(() => { stopRecording(); }, 15000);
 
-  }).catch(() => {
-    feedback.style.display = 'block';
-    feedback.textContent = '마이크 권한을 허용해주세요';
-    speak('마이크 권한을 허용해주세요');
-    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+  }).catch(err => {
+    isListening = false;
+    btn.classList.remove('listening');
+    btn.textContent = '🎤';
+    feedback.textContent = '❌ 마이크 권한이 필요해요. 설정에서 허용해주세요.';
+    speak('마이크 권한이 필요해요');
+    setTimeout(() => { feedback.style.display = 'none'; }, 4000);
   });
 }
 
