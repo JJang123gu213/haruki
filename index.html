@@ -673,9 +673,20 @@ async function executePrint() {
   }
 }
 
-// ===== 음성 인식 =====
+// ===== 음성 인식 + TTS =====
 let recognition = null;
 let isListening = false;
+
+function speak(text) {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR';
+    u.rate = 1.1;
+    u.pitch = 1.0;
+    window.speechSynthesis.speak(u);
+  }
+}
 
 function toggleVoice() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -732,19 +743,21 @@ function handleVoiceCommand(cmd) {
   const feedback = document.getElementById('micFeedback');
   cmd = cmd.toLowerCase();
 
+  function say(msg) { feedback.textContent = msg; speak(msg); }
+
   // 확인 모드
   if (cmd.includes('재차') && (cmd.includes('안물어') || cmd.includes('안 물어') || cmd.includes('안해도'))) {
     skipConfirmation = true; localStorage.setItem('skipConfirm','true');
-    feedback.textContent = '확인 없이 처리합니다'; return;
+    say('확인 없이 처리할게요'); return;
   }
   if ((cmd.includes('재차') || cmd.includes('다시')) && (cmd.includes('물어봐') || cmd.includes('확인'))) {
     skipConfirmation = false; localStorage.setItem('skipConfirm','false');
-    feedback.textContent = '확인 후 처리합니다'; return;
+    say('확인 후 처리할게요'); return;
   }
 
   // 프린터 출력
   if (cmd.includes('출력') || cmd.includes('프린터') || cmd.includes('인쇄')) {
-    openPrinter(); feedback.textContent = '프린터 출력'; return;
+    openPrinter(); say('프린터 출력 열었어요'); return;
   }
 
   // 입고/출고
@@ -753,23 +766,24 @@ function handleVoiceCommand(cmd) {
   if (isIn || isOut) {
     const action = isIn ? '입고' : '출고';
     const qtyMatch = cmd.match(/(\d+)\s*개/);
-    if (!qtyMatch) { feedback.textContent = '수량 인식 실패'; return; }
+    if (!qtyMatch) { say('수량을 인식하지 못했어요'); return; }
     const qty = parseInt(qtyMatch[1]);
 
     let query = cmd.replace(/\d+\s*개/g,'').replace(/입고|출고|해줘|해 줘|하자|부탁|좀/g,'').trim();
-    if (!query) { feedback.textContent = '상품명 인식 실패'; return; }
+    if (!query) { say('상품명을 인식하지 못했어요'); return; }
 
     const words = query.split(' ').filter(w=>w);
     let matched = products.filter(p => words.every(w => p.NAME.toLowerCase().includes(w)));
     if (!matched.length) matched = products.filter(p => words.some(w => p.NAME.toLowerCase().includes(w)));
-    if (!matched.length) { feedback.textContent = `'${query}' 상품 없음`; return; }
+    if (!matched.length) { say(`${query} 상품을 찾을 수 없어요`); return; }
 
     if (matched.length > 1) {
       const names = matched.slice(0,3).map(p => p.VENDOR+' '+p.NAME).join('\n');
+      speak('여러 상품이 있어요. 거래처명을 선택해주세요');
       const choice = prompt('어떤 상품입니까?\n\n'+names+'\n\n거래처명을 입력하세요:');
       if (!choice) return;
       matched = matched.filter(p => p.VENDOR.includes(choice));
-      if (!matched.length) { feedback.textContent = '해당 거래처 없음'; return; }
+      if (!matched.length) { say('해당 거래처를 찾을 수 없어요'); return; }
     }
 
     const p = matched[0];
@@ -777,24 +791,25 @@ function handleVoiceCommand(cmd) {
     const newStock = isIn ? curStock + qty : Math.max(0, curStock - qty);
 
     if (!skipConfirmation) {
+      speak(`${p.NAME} ${qty}개 ${action}. 현재 ${curStock}개에서 ${newStock}개로 변경합니다`);
       if (!confirm(`${p.VENDOR} ${p.NAME}\n${qty}개 ${action} 맞습니까?\n\n${curStock}개 → ${newStock}개`)) return;
     }
 
     apiPost({action:'updateStock',barcode:p.BARCODE,newStock}).then(() => {
-      feedback.textContent = `${p.NAME} ${qty}개 ${action} 완료`;
+      say(`${p.NAME} ${qty}개 ${action} 완료했어요`);
       loadAll();
     });
     return;
   }
 
   // 탭 이동
-  if (cmd.includes('상품') || cmd.includes('제품')) { switchTab('products'); feedback.textContent = '상품'; }
-  else if (cmd.includes('거래처') || cmd.includes('사입처')) { switchTab('vendors'); feedback.textContent = '거래처'; }
-  else if (cmd.includes('고객') || cmd.includes('손님')) { switchTab('customers'); feedback.textContent = '고객'; }
-  else if (cmd.includes('사입')) { switchTab('purchase'); feedback.textContent = '사입용'; }
-  else if (cmd.includes('새로고침') || cmd.includes('업데이트')) { loadAll(); feedback.textContent = '새로고침'; }
-  else if (cmd.includes('자동') || cmd.includes('영수증') || cmd.includes('스캔')) { switchTab('purchase'); feedback.textContent = '사입용'; }
-  else { feedback.textContent = '인식 불가: ' + cmd; }
+  if (cmd.includes('상품') || cmd.includes('제품')) { switchTab('products'); say('상품 목록이에요'); }
+  else if (cmd.includes('거래처') || cmd.includes('사입처')) { switchTab('vendors'); say('거래처 목록이에요'); }
+  else if (cmd.includes('고객') || cmd.includes('손님')) { switchTab('customers'); say('고객 목록이에요'); }
+  else if (cmd.includes('사입')) { switchTab('purchase'); say('사입용 화면이에요'); }
+  else if (cmd.includes('새로고침') || cmd.includes('업데이트')) { loadAll(); say('새로고침 했어요'); }
+  else if (cmd.includes('자동') || cmd.includes('영수증') || cmd.includes('스캔')) { switchTab('purchase'); say('사입용 화면이에요'); }
+  else { say('잘 못 알아들었어요. 다시 말해주세요'); }
 }
 
 // ===== 모달 =====
