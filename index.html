@@ -89,7 +89,10 @@ body{font-family:-apple-system,sans-serif;background:#f5f5f5;padding-bottom:80px
 
 <!-- 거래처 -->
 <div class="page" id="page-vendors">
-  <input class="search-box" id="vendorSearch" placeholder="거래처명, 건물 검색" oninput="filterVendors()">
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <input class="search-box" id="vendorSearch" placeholder="거래처명, 건물 검색" oninput="filterVendors()" style="flex:1;margin:0">
+    <button class="btn btn-blue" onclick="showAddVendor()" style="width:50px;padding:8px;font-size:20px">+</button>
+  </div>
   <div id="vendorList"></div>
 </div>
 
@@ -100,7 +103,10 @@ body{font-family:-apple-system,sans-serif;background:#f5f5f5;padding-bottom:80px
     <button class="btn store-filter" onclick="setStoreFilter('남성복')" style="flex:1;padding:8px;font-size:13px;background:#e5e5e5;color:#333">👔 남성복</button>
     <button class="btn store-filter" onclick="setStoreFilter('여성복')" style="flex:1;padding:8px;font-size:13px;background:#e5e5e5;color:#333">👗 여성복</button>
   </div>
-  <input class="search-box" id="customerSearch" placeholder="고객명, 연락처 검색" oninput="filterCustomers()">
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <input class="search-box" id="customerSearch" placeholder="고객명, 연락처 검색" oninput="filterCustomers()" style="flex:1;margin:0">
+    <button class="btn btn-blue" onclick="showAddCustomer()" style="width:50px;padding:8px;font-size:20px">+</button>
+  </div>
   <div id="customerList"></div>
 </div>
 
@@ -424,6 +430,52 @@ async function updateVendor(originalName) {
   } catch(e) { alert('저장 실패'); }
 }
 
+function showAddVendor() {
+  document.getElementById('detailContent').innerHTML = `
+    <div class="modal-title">거래처 등록</div>
+    <label style="font-size:13px;color:#888">거래처명</label>
+    <input class="input" id="newVendorName" placeholder="거래처명">
+    <label style="font-size:13px;color:#888">매장전화</label>
+    <input class="input" id="newVendorPhone" type="tel" placeholder="매장 전화번호">
+    <label style="font-size:13px;color:#888">휴대폰</label>
+    <input class="input" id="newVendorMobile" type="tel" placeholder="휴대폰 번호">
+    <label style="font-size:13px;color:#888">건물</label>
+    <input class="input" id="newVendorBuilding" placeholder="건물명">
+    <label style="font-size:13px;color:#888">층</label>
+    <input class="input" id="newVendorFloor" placeholder="층">
+    <label style="font-size:13px;color:#888">호</label>
+    <input class="input" id="newVendorRoom" placeholder="호">
+    <label style="font-size:13px;color:#888">비고</label>
+    <textarea class="input" id="newVendorNote" rows="2" style="resize:vertical" placeholder="메모"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-blue" onclick="addVendor()" style="flex:1">등록</button>
+      <button class="btn btn-gray" onclick="closeModal('detailModal')" style="flex:1">닫기</button>
+    </div>
+  `;
+  openModal('detailModal');
+}
+
+async function addVendor() {
+  const name = document.getElementById('newVendorName').value.trim();
+  if (!name) { alert('거래처명을 입력해주세요'); return; }
+  const data = {
+    NAME: name,
+    PHONE: document.getElementById('newVendorPhone').value.trim(),
+    MOBILE: document.getElementById('newVendorMobile').value.trim(),
+    BUILDING: document.getElementById('newVendorBuilding').value.trim(),
+    FLOOR: document.getElementById('newVendorFloor').value.trim(),
+    ROOM: document.getElementById('newVendorRoom').value.trim(),
+    NOTE: document.getElementById('newVendorNote').value.trim(),
+    DELETE: '☐'
+  };
+  try {
+    await apiPost({action:'addVendor', data});
+    alert('등록되었습니다');
+    closeModal('detailModal');
+    loadAll();
+  } catch(e) { alert('등록 실패'); }
+}
+
 // ===== 고객 =====
 let currentStoreFilter = '전체';
 
@@ -494,6 +546,55 @@ async function updateCustomerStore(name, mobile) {
     closeModal('detailModal');
     loadAll();
   } catch(e) { alert('저장 실패'); }
+}
+
+function showAddCustomer() {
+  document.getElementById('detailContent').innerHTML = `
+    <div class="modal-title">고객 등록</div>
+    <label style="font-size:13px;color:#888">이름</label>
+    <input class="input" id="newCustName" placeholder="고객 이름">
+    <label style="font-size:13px;color:#888">연락처</label>
+    <input class="input" id="newCustMobile" type="tel" placeholder="010-0000-0000">
+    <label style="font-size:13px;color:#888">매장</label>
+    <select class="input" id="newCustStore" style="padding:10px 14px">
+      <option value="">미지정</option>
+      <option value="남성복">👔 남성복</option>
+      <option value="여성복">👗 여성복</option>
+    </select>
+    <label style="font-size:13px;color:#888">광고수신</label>
+    <select class="input" id="newCustAd" style="padding:10px 14px">
+      <option value="수신">수신</option>
+      <option value="거부">거부</option>
+    </select>
+    <label style="font-size:13px;color:#888">메모</label>
+    <textarea class="input" id="newCustMemo" rows="2" style="resize:vertical" placeholder="메모"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-blue" onclick="addCustomer()" style="flex:1">등록</button>
+      <button class="btn btn-gray" onclick="closeModal('detailModal')" style="flex:1">닫기</button>
+    </div>
+  `;
+  openModal('detailModal');
+}
+
+async function addCustomer() {
+  const name = document.getElementById('newCustName').value.trim();
+  const mobile = document.getElementById('newCustMobile').value.trim();
+  if (!name || !mobile) { alert('이름과 연락처를 입력해주세요'); return; }
+  const data = {
+    NAME: name,
+    MOBILE: mobile,
+    DATE: new Date().toISOString().substring(0,19).replace('T',' '),
+    DELETE: '☐',
+    MEMO: document.getElementById('newCustMemo').value.trim(),
+    AD_CONSENT: document.getElementById('newCustAd').value,
+    STORE: document.getElementById('newCustStore').value
+  };
+  try {
+    await apiPost({action:'addCustomer', data});
+    alert('등록되었습니다');
+    closeModal('detailModal');
+    loadAll();
+  } catch(e) { alert('등록 실패'); }
 }
 
 // ===== 사입용 =====
