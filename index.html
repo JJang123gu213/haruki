@@ -361,9 +361,30 @@ function showVendorDetail(name) {
     <input class="input" id="editVendorRoom" value="${v.ROOM||''}">
     <label style="font-size:13px;color:#888">비고</label>
     <textarea class="input" id="editVendorNote" rows="3" style="resize:vertical">${v.NOTE||''}</textarea>
-    <button class="btn btn-gray" onclick="closeModal('detailModal')" style="margin-top:12px">닫기</button>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-blue" onclick="updateVendor('${v.NAME}')" style="flex:1">저장</button>
+      <button class="btn btn-gray" onclick="closeModal('detailModal')" style="flex:1">닫기</button>
+    </div>
   `;
   openModal('detailModal');
+}
+
+async function updateVendor(originalName) {
+  const data = {
+    NAME: document.getElementById('editVendorName').value,
+    PHONE: document.getElementById('editVendorPhone').value,
+    MOBILE: document.getElementById('editVendorMobile').value,
+    BUILDING: document.getElementById('editVendorBuilding').value,
+    FLOOR: document.getElementById('editVendorFloor').value,
+    ROOM: document.getElementById('editVendorRoom').value,
+    NOTE: document.getElementById('editVendorNote').value
+  };
+  try {
+    await apiPost({action:'updateVendor', originalName, data});
+    alert('저장되었습니다');
+    closeModal('detailModal');
+    loadAll();
+  } catch(e) { alert('저장 실패'); }
 }
 
 // ===== 고객 =====
