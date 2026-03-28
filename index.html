@@ -740,17 +740,29 @@ async function correctWithGemini(raw) {
   const apiKey = getGeminiKey();
   if (!apiKey) return raw;
   try {
-    const productNames = products.slice(0, 50).map(p => p.NAME).join(', ');
+    const productNames = products.slice(0, 100).map(p => p.NAME).join(', ');
     const vendorNames = vendors.slice(0, 30).map(v => v.NAME).join(', ');
-    const prompt = `음성인식 결과를 교정해줘. 재고관리 앱에서 사용하는 명령어야.
-가능한 명령: 입고, 출고, 상품, 거래처, 고객, 사입, 새로고침, 출력, 영수증
-등록된 상품명: ${productNames}
-등록된 거래처: ${vendorNames}
+    const prompt = `너는 의류 매장 재고관리 앱의 음성 명령 교정기야.
 
-음성인식 원본: "${raw}"
+## 등록된 상품명
+${productNames}
 
-위 상품명/거래처 목록을 참고해서, 발음이 비슷하거나 오인식된 부분을 교정해줘.
-교정된 문장만 출력해. 다른 설명 없이 교정 결과만.`;
+## 등록된 거래처
+${vendorNames}
+
+## 가능한 명령 패턴
+- "[상품명] [숫자]개 입고/출고" (예: "스카시 단가라후드 검정 3개 입고")
+- "상품", "거래처", "고객", "사입", "새로고침", "출력"
+
+## 음성인식 원본
+"${raw}"
+
+## 교정 규칙
+1. 발음이 비슷한 단어를 등록된 상품명으로 교정 (예: "스캇이" → "스카시")
+2. 단어 순서가 바뀌어도 가장 일치하는 상품명으로 재배열 (예: "단가라 검정 후드" → "단가라후드 검정")
+3. 상품명에 포함된 단어들이 분리되어 인식됐으면 합쳐줘 (예: "단가라 후드" → "단가라후드")
+4. 숫자와 입고/출고 키워드는 그대로 유지
+5. 교정된 문장만 출력. 설명 없이.`;
 
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -811,8 +823,9 @@ function toggleVoice() {
   recognition.onerror = () => {
     isListening = false;
     btn.classList.remove('listening');
-    feedback.textContent = '인식 실패';
-    setTimeout(() => { feedback.style.display = 'none'; }, 2000);
+    feedback.textContent = '잘 못 들었어요. 다시 말해주세요';
+    speak('잘 못 들었어요. 다시 말해주세요');
+    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
   };
 
   recognition.start();
@@ -852,7 +865,21 @@ function handleVoiceCommand(cmd) {
     if (!query) { say('상품명을 인식하지 못했어요'); return; }
 
     const words = query.split(' ').filter(w=>w);
+    // 1단계: 모든 단어 포함
     let matched = products.filter(p => words.every(w => p.NAME.toLowerCase().includes(w)));
+    // 2단계: 단어 붙여서 매칭 (예: "단가라 후드" → "단가라후드")
+    if (!matched.length) {
+      const joined = words.join('');
+      matched = products.filter(p => p.NAME.toLowerCase().includes(joined));
+    }
+    // 3단계: 일부 단어만 매칭 (2개 이상 일치하는 것 우선)
+    if (!matched.length) {
+      matched = products.map(p => ({p, score: words.filter(w => p.NAME.toLowerCase().includes(w)).length}))
+        .filter(x => x.score >= Math.min(2, words.length))
+        .sort((a,b) => b.score - a.score)
+        .map(x => x.p);
+    }
+    // 4단계: 아무 단어나 하나라도 매칭
     if (!matched.length) matched = products.filter(p => words.some(w => p.NAME.toLowerCase().includes(w)));
     if (!matched.length) { say(`${query} 상품을 찾을 수 없어요`); return; }
 
