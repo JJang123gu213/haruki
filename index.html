@@ -804,8 +804,13 @@ ${vendorNames}
   return raw;
 }
 
-let voiceRetryCount = 0;
-let gotResult = false;
+function resetVoiceUI() {
+  isListening = false;
+  recognition = null;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('listening');
+  btn.style.pointerEvents = 'auto';
+}
 
 function toggleVoice() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -813,82 +818,84 @@ function toggleVoice() {
     return;
   }
 
+  // 이전 세션 강제 정리
+  if (recognition) {
+    try { recognition.abort(); } catch(e) {}
+    recognition = null;
+  }
+
   if (isListening) {
-    recognition.stop();
-    voiceRetryCount = 0;
+    resetVoiceUI();
     return;
   }
 
-  startRecognition();
-}
-
-function startRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
   recognition.lang = 'ko-KR';
-  recognition.continuous = true;
+  recognition.continuous = false;
   recognition.interimResults = true;
-  recognition.maxAlternatives = 3;
-  gotResult = false;
 
   const btn = document.getElementById('micBtn');
   const feedback = document.getElementById('micFeedback');
+  let hasResult = false;
 
   recognition.onstart = () => {
     isListening = true;
+    hasResult = false;
     btn.classList.add('listening');
     feedback.style.display = 'block';
-    feedback.textContent = voiceRetryCount > 0 ? '다시 듣고 있어요...' : '듣고 있어요...';
+    feedback.textContent = '듣고 있어요...';
+    speak('듣고 있어요');
   };
 
   recognition.onresult = (e) => {
-    gotResult = true;
-    voiceRetryCount = 0;
-    const last = e.results[e.results.length - 1];
-    const text = last[0].transcript;
+    hasResult = true;
+    const text = Array.from(e.results).map(r => r[0].transcript).join('');
     feedback.textContent = text;
-    if (last.isFinal) {
-      recognition.stop();
-      correctWithGemini(text).then(corrected => handleVoiceCommand(corrected));
+    if (e.results[e.results.length - 1].isFinal) {
+      feedback.textContent = '처리 중...';
+      correctWithGemini(text).then(corrected => {
+        handleVoiceCommand(corrected);
+        // 명령 처리 후 상태 완전 리셋
+        setTimeout(() => {
+          resetVoiceUI();
+          feedback.style.display = 'none';
+        }, 3000);
+      });
     }
   };
 
   recognition.onend = () => {
-    isListening = false;
-    btn.classList.remove('listening');
-    if (!gotResult && voiceRetryCount < 2) {
-      voiceRetryCount++;
-      feedback.textContent = '다시 말해주세요...';
-      setTimeout(() => startRecognition(), 300);
-      return;
+    // 결과 없이 끝난 경우만 처리 (결과가 있으면 onresult에서 처리)
+    if (!hasResult) {
+      speak('못 알아들었어요. 다시 눌러주세요');
+      feedback.textContent = '못 알아들었어요. 다시 눌러주세요';
+      setTimeout(() => { feedback.style.display = 'none'; }, 3000);
     }
-    if (!gotResult) {
-      feedback.textContent = '인식 실패. 마이크를 다시 눌러주세요';
-      speak('인식하지 못했어요. 마이크를 다시 눌러주세요');
-      voiceRetryCount = 0;
-    }
-    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+    resetVoiceUI();
   };
 
   recognition.onerror = (e) => {
-    if (e.error === 'no-speech') {
-      // 말을 안 한 경우 - 자동 재시도
-      if (voiceRetryCount < 2) {
-        voiceRetryCount++;
-        return; // onend에서 재시도
-      }
-    }
-    if (e.error === 'aborted' || e.error === 'not-allowed') {
-      isListening = false;
-      btn.classList.remove('listening');
+    if (e.error === 'no-speech') return; // onend에서 처리
+    if (e.error === 'not-allowed') {
       feedback.textContent = '마이크 권한을 확인해주세요';
       speak('마이크 권한을 확인해주세요');
-      voiceRetryCount = 0;
-      setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+    } else {
+      feedback.textContent = '오류 발생. 다시 시도해주세요';
+      speak('오류가 발생했어요. 다시 시도해주세요');
     }
+    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+    resetVoiceUI();
   };
 
-  recognition.start();
+  try {
+    recognition.start();
+  } catch(e) {
+    resetVoiceUI();
+    feedback.textContent = '마이크 시작 실패. 다시 눌러주세요';
+    feedback.style.display = 'block';
+    setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+  }
 }
 
 function handleVoiceCommand(cmd) {
