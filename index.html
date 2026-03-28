@@ -144,8 +144,12 @@ body{font-family:-apple-system,sans-serif;background:#f5f5f5;padding-bottom:80px
 <div class="modal" id="settingsModal">
   <div class="modal-content">
     <div class="modal-title">설정</div>
-    <label style="font-size:13px;color:#888">Gemini API 키</label>
-    <input class="input" id="apiKeyInput" type="password" placeholder="Google AI Studio에서 발급">
+    <label style="font-size:13px;color:#888">Gemini API 키 (최대 5개, 자동 로테이션)</label>
+    <input class="input apiKeySlot" type="password" placeholder="API 키 1">
+    <input class="input apiKeySlot" type="password" placeholder="API 키 2">
+    <input class="input apiKeySlot" type="password" placeholder="API 키 3">
+    <input class="input apiKeySlot" type="password" placeholder="API 키 4">
+    <input class="input apiKeySlot" type="password" placeholder="API 키 5">
     <label style="font-size:13px;color:#888">프린터 서버 주소</label>
     <input class="input" id="serverUrlInput" placeholder="예: 192.168.0.10:5000">
     <div style="display:flex;gap:8px;margin-top:12px">
@@ -526,7 +530,7 @@ async function processReceiptPhoto(input) {
   const file = input.files[0];
   if (!file) return;
 
-  const apiKey = localStorage.getItem('geminiAPIKey') || '';
+  const apiKey = getGeminiKey();
   if (!apiKey) {
     alert('Gemini API 키를 설정해주세요.\n대시보드 ⚙️ 설정에서 입력하세요.');
     return;
@@ -689,7 +693,7 @@ function speak(text) {
 }
 
 async function correctWithGemini(raw) {
-  const apiKey = localStorage.getItem('geminiAPIKey') || '';
+  const apiKey = getGeminiKey();
   if (!apiKey) return raw;
   try {
     const productNames = products.slice(0, 50).map(p => p.NAME).join(', ');
@@ -851,12 +855,31 @@ document.querySelectorAll('.modal').forEach(m => {
 });
 
 // ===== 설정 =====
+let geminiKeyIndex = 0;
+
+function getGeminiKey() {
+  const keys = JSON.parse(localStorage.getItem('geminiAPIKeys') || '[]').filter(k => k);
+  if (!keys.length) return '';
+  const key = keys[geminiKeyIndex % keys.length];
+  geminiKeyIndex = (geminiKeyIndex + 1) % keys.length;
+  return key;
+}
+
 function loadSettings() {
-  document.getElementById('apiKeyInput').value = localStorage.getItem('geminiAPIKey') || '';
+  const keys = JSON.parse(localStorage.getItem('geminiAPIKeys') || '[]');
+  // 기존 단일 키 마이그레이션
+  if (!keys.length) {
+    const old = localStorage.getItem('geminiAPIKey');
+    if (old) keys[0] = old;
+  }
+  document.querySelectorAll('.apiKeySlot').forEach((el, i) => el.value = keys[i] || '');
   document.getElementById('serverUrlInput').value = localStorage.getItem('printerServerURL') || '';
 }
+
 function saveSettings() {
-  localStorage.setItem('geminiAPIKey', document.getElementById('apiKeyInput').value);
+  const keys = [];
+  document.querySelectorAll('.apiKeySlot').forEach(el => keys.push(el.value.trim()));
+  localStorage.setItem('geminiAPIKeys', JSON.stringify(keys));
   localStorage.setItem('printerServerURL', document.getElementById('serverUrlInput').value);
   closeModal('settingsModal');
   alert('저장되었습니다');
