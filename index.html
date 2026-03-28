@@ -655,15 +655,22 @@ async function analyzeReceipts() {
     try {
       const base64 = await fileToBase64(files[i]);
       const data = await analyzeOneReceipt(base64, files[i].type || 'image/jpeg');
-      if (data) {
+      if (data && data.products && data.products.length > 0) {
         if (data.supplier) allSuppliers.push(data.supplier);
-        if (data.products) data.products.forEach(p => {
+        data.products.forEach(p => {
           p._supplier = data.supplier?.name || '';
           allProducts.push(p);
         });
+        status.textContent = `${i+1}번 사진: ${data.products.length}개 상품 발견`;
+      } else if (data && data._error) {
+        status.textContent = `${i+1}번 사진 오류: ${data._error}`;
+        results.innerHTML += `<div style="color:red;font-size:12px;padding:4px">${i+1}번: ${data._error}</div>`;
+      } else {
+        status.textContent = `${i+1}번 사진: 상품을 찾지 못함`;
       }
     } catch(e) {
       status.textContent = `${i+1}번 사진 분석 실패: ${e.message}`;
+      results.innerHTML += `<div style="color:red;font-size:12px;padding:4px">${i+1}번 에러: ${e.message}</div>`;
     }
   }
 
@@ -757,23 +764,47 @@ async function analyzeOneReceipt(base64, mimeType) {
 6. 품명의 슬래시(/) 뒤 색상/사이즈는 분리
 7. FREE는 F로 변환`;
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      contents: [{parts: [
-        {inline_data: {mime_type: mimeType, data: base64}},
-        {text: prompt}
-      ]}],
-      generationConfig: {maxOutputTokens: 4096}
-    })
-  });
-  const result = await res.json();
-  const text = (result.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
-  const first = text.indexOf('{');
-  const last = text.lastIndexOf('}');
-  if (first === -1 || last === -1) return null;
-  return JSON.parse(text.substring(first, last + 1));
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        contents: [{parts: [
+          {inline_data: {mime_type: mimeType, data: base64}},
+          {text: prompt}
+        ]}],
+        generationConfig: {maxOutputTokens: 4096}
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return {_error: `API 오류 ${res.status}: ${errText.substring(0, 100)}`};
+    }
+
+    const result = await res.json();
+
+    if (result.error) {
+      return {_error: result.error.message || JSON.stringify(result.error)};
+    }
+
+    const parts = result.candidates?.[0]?.content?.parts || [];
+    const text = parts.map(p => p.text || '').join('');
+
+    if (!text) {
+      return {_error: 'AI 응답이 비어있습니다'};
+    }
+
+    const first = text.indexOf('{');
+    const last = text.lastIndexOf('}');
+    if (first === -1 || last === -1) {
+      return {_error: 'JSON을 찾을 수 없음: ' + text.substring(0, 100)};
+    }
+
+    return JSON.parse(text.substring(first, last + 1));
+  } catch(e) {
+    return {_error: e.message};
+  }
 }
 
 async function registerAllProducts(total) {
