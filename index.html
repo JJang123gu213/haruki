@@ -652,25 +652,40 @@ async function analyzeReceipts() {
     status.textContent = `AI 분석 중... (${i+1}/${files.length})`;
     btn.textContent = `분석 중 ${i+1}/${files.length}`;
 
-    try {
-      const base64 = await fileToBase64(files[i]);
-      const data = await analyzeOneReceipt(base64, files[i].type || 'image/jpeg');
-      if (data && data.products && data.products.length > 0) {
-        if (data.supplier) allSuppliers.push(data.supplier);
-        data.products.forEach(p => {
-          p._supplier = data.supplier?.name || '';
-          allProducts.push(p);
-        });
-        status.textContent = `${i+1}번 사진: ${data.products.length}개 상품 발견`;
-      } else if (data && data._error) {
-        status.textContent = `${i+1}번 사진 오류: ${data._error}`;
-        results.innerHTML += `<div style="color:red;font-size:12px;padding:4px">${i+1}번: ${data._error}</div>`;
+    // 사진 간 3초 간격 (429 방지, 첫번째는 바로)
+    if (i > 0) {
+      status.textContent = `다음 분석 대기 중... (${i+1}/${files.length})`;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    const base64 = await fileToBase64(files[i]);
+    let data = null;
+    let retries = 0;
+
+    // 429 에러 시 다른 키로 재시도 (최대 3회)
+    while (retries < 3) {
+      data = await analyzeOneReceipt(base64, files[i].type || 'image/jpeg');
+      if (data && data._error && data._error.includes('429')) {
+        retries++;
+        status.textContent = `${i+1}번: 한도 초과, ${retries}번째 재시도 (다른 키)... 5초 대기`;
+        await new Promise(r => setTimeout(r, 5000));
       } else {
-        status.textContent = `${i+1}번 사진: 상품을 찾지 못함`;
+        break;
       }
-    } catch(e) {
-      status.textContent = `${i+1}번 사진 분석 실패: ${e.message}`;
-      results.innerHTML += `<div style="color:red;font-size:12px;padding:4px">${i+1}번 에러: ${e.message}</div>`;
+    }
+
+    if (data && data.products && data.products.length > 0) {
+      if (data.supplier) allSuppliers.push(data.supplier);
+      data.products.forEach(p => {
+        p._supplier = data.supplier?.name || '';
+        allProducts.push(p);
+      });
+      status.textContent = `${i+1}번 사진: ${data.products.length}개 상품 발견`;
+    } else if (data && data._error) {
+      status.textContent = `${i+1}번 사진 오류: ${data._error}`;
+      results.innerHTML += `<div style="color:red;font-size:12px;padding:4px">${i+1}번: ${data._error}</div>`;
+    } else {
+      status.textContent = `${i+1}번 사진: 상품을 찾지 못함`;
     }
   }
 
