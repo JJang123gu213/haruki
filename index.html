@@ -688,6 +688,37 @@ function speak(text) {
   }
 }
 
+async function correctWithGemini(raw) {
+  const apiKey = localStorage.getItem('geminiAPIKey') || '';
+  if (!apiKey) return raw;
+  try {
+    const productNames = products.slice(0, 50).map(p => p.NAME).join(', ');
+    const vendorNames = vendors.slice(0, 30).map(v => v.NAME).join(', ');
+    const prompt = `음성인식 결과를 교정해줘. 재고관리 앱에서 사용하는 명령어야.
+가능한 명령: 입고, 출고, 상품, 거래처, 고객, 사입, 새로고침, 출력, 영수증
+등록된 상품명: ${productNames}
+등록된 거래처: ${vendorNames}
+
+음성인식 원본: "${raw}"
+
+위 상품명/거래처 목록을 참고해서, 발음이 비슷하거나 오인식된 부분을 교정해줘.
+교정된 문장만 출력해. 다른 설명 없이 교정 결과만.`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({contents: [{parts: [{text: prompt}]}]})
+    });
+    const data = await res.json();
+    const corrected = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (corrected) {
+      document.getElementById('micFeedback').textContent = corrected;
+      return corrected;
+    }
+  } catch(e) {}
+  return raw;
+}
+
 function toggleVoice() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('이 브라우저에서 음성 인식을 지원하지 않습니다');
@@ -719,7 +750,7 @@ function toggleVoice() {
     const text = Array.from(e.results).map(r => r[0].transcript).join('');
     feedback.textContent = text;
     if (e.results[0].isFinal) {
-      handleVoiceCommand(text);
+      correctWithGemini(text).then(corrected => handleVoiceCommand(corrected));
     }
   };
 
